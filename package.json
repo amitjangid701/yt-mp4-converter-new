@@ -1,14 +1,12 @@
 {
-  "name": "drift-media-downloader",
+  "name": "yt-mp4-converter-backend",
   "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "description": "A safe downloader for permitted direct media URLs and local files.",
+  "main": "server.js",
   "scripts": {
-    "start": "node server.mjs",
-    "check": "node --check server.mjs && node --check dist/app.js"
+    "start": "node server.js"
   },
-  "engines": {
-    "node": ">=20"
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
   }
 }
