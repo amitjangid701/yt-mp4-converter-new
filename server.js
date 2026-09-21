@@ -22,7 +22,7 @@ app.get('/', (req, res) => {
             .box { background: #1e1e1e; padding: 30px; border-radius: 8px; text-align: center; max-width: 400px; width: 100%; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
             input { width: 90%; padding: 10px; margin: 15px 0; border: 1px solid #333; background: #2b2b2b; color: #fff; border-radius: 4px; }
             button { background: #ff0000; color: #fff; border: none; padding: 10px 20px; font-weight: bold; cursor: pointer; border-radius: 4px; width: 95%; }
-            #status { margin-top: 15px; font-size: 13px; color: #bbb; line-height: 1.4; }
+            #status { margin-top: 15px; font-size: 13px; color: #bbb; line-height: 1.4; word-wrap: break-word; }
         </style>
     </head>
     <body>
@@ -38,7 +38,7 @@ app.get('/', (req, res) => {
                 const status = document.getElementById('status');
                 if(!url) return alert('Please enter a URL');
                 
-                status.innerHTML = 'Processing video stream... <br><small style="color: #888;">Initial cloud processing can take 15-30 seconds.</small>';
+                status.innerHTML = 'Processing video stream... <br><small style="color: #888;">Render containers take 15-30 seconds to stream data chunks.</small>';
                 try {
                     const res = await fetch('/convert', {
                         method: 'POST',
@@ -48,7 +48,7 @@ app.get('/', (req, res) => {
                     
                     if(!res.ok) {
                         const errorPayload = await res.json().catch(() => ({}));
-                        throw new Error(errorPayload.error || 'Server processing failed.');
+                        throw new Error(errorPayload.error || 'The system could not parse this specific video format.');
                     }
                     
                     status.innerText = 'Streaming file data directly to your device...';
@@ -59,7 +59,7 @@ app.get('/', (req, res) => {
                     document.body.appendChild(a);
                     a.click();
                     a.remove();
-                    status.innerHTML = '<span style="color:#00ff00;">Success! File downloaded.</span>';
+                    status.innerHTML = '<span style="color:#00ff00; font-weight:bold;">✓ Success! File downloaded.</span>';
                 } catch(e) {
                     status.innerHTML = '<span style="color:#ff3333; font-weight:bold;">Error:</span> ' + e.message;
                 }
@@ -75,38 +75,41 @@ app.post('/convert', (req, res) => {
     const videoUrl = req.body.url;
     if (!videoUrl) return res.status(400).send({ error: 'URL required' });
 
-    console.log(`[Engine]: Initiating stream compilation for ${videoUrl}`);
+    console.log(`[Engine]: Initiating stream pipeline for target: ${videoUrl}`);
 
     res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
     res.setHeader('Content-Type', 'video/mp4');
 
-    // Refined extractor parameters to evade bot blockages and leverage mobile player endpoints
+    // Bypasses datacenter blocks using embedded & TV player endpoints as a fallback fallback
     const ytdlp = spawn('yt-dlp', [
         '-f', 'bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         '--merge-output-format', 'mp4',
-        '--extractor-args', 'youtube:player_client=ios,web_safari',
+        '--no-cache-dir',
+        '--extractor-args', 'youtube:player_client=tv,web_embedded,ios',
         '-o', '-', 
         videoUrl
     ]);
 
+    // Pipe directly into response object
     ytdlp.stdout.pipe(res);
 
     let errorLog = "";
     ytdlp.stderr.on('data', (data) => {
         const chunk = data.toString();
         errorLog += chunk;
-        console.log(`[yt-dlp log]: ${chunk.trim()}`);
+        console.log(`[yt-dlp engine]: ${chunk.trim()}`);
     });
 
     ytdlp.on('close', (code) => {
         if (code !== 0) {
-            console.error(`[Engine Error]: process exited with code ${code}`);
+            console.error(`[Engine Exit]: Core finished with failure status code ${code}`);
             if (!res.headersSent) {
-                // If it is an obvious block or bot verification issue, forward it cleanly to the front end
                 if (errorLog.includes("Sign in to confirm")) {
-                    res.status(403).send({ error: 'YouTube blocked this cloud server IP. Try a shorter video or alternate link.' });
+                    res.status(403).send({ error: 'YouTube has flagged the server IP. Try a different video link.' });
+                } else if (errorLog.includes("403")) {
+                    res.status(403).send({ error: 'Access Forbidden (HTTP 403). Streaming pipeline rejected.' });
                 } else {
-                    res.status(500).send({ error: 'Extraction engine failed to parse this video configuration.' });
+                    res.status(500).send({ error: 'Extraction engine crashed. See system logs.' });
                 }
             }
         }
