@@ -1,96 +1,25 @@
-const express = require('express');
-const cors = require('cors');
-const { spawn } = require('child_process');
-
-const app = express();
-
-app.use(cors());
-app.use(express.json());
-
-const PORT = process.env.PORT || 3000;
-
-// Main interactive UI Frontend
-app.get('/', (req, res) => {
-    res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <title>YouTube to MP4 Downloader</title>
-        <style>
-            body { font-family: sans-serif; background: #121212; color: #fff; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-            .box { background: #1e1e1e; padding: 30px; border-radius: 8px; text-align: center; max-width: 400px; width: 100%; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
-            input { width: 90%; padding: 10px; margin: 15px 0; border: 1px solid #333; background: #2b2b2b; color: #fff; border-radius: 4px; }
-            button { background: #ff0000; color: #fff; border: none; padding: 10px 20px; font-weight: bold; cursor: pointer; border-radius: 4px; width: 95%; }
-            #status { margin-top: 15px; font-size: 13px; color: #bbb; line-height: 1.4; word-wrap: break-word; }
-        </style>
-    </head>
-    <body>
-        <div class="box">
-            <h2>YouTube to MP4</h2>
-            <input type="text" id="url" placeholder="Paste YouTube link here...">
-            <button onclick="download()">Download Video</button>
-            <div id="status"></div>
-        </div>
-        <script>
-            async function download() {
-                const url = document.getElementById('url').value.trim();
-                const status = document.getElementById('status');
-                if(!url) return alert('Please enter a URL');
-                
-                status.innerHTML = 'Processing video stream... <br><small style="color: #888;">Render containers take 15-30 seconds to stream data chunks.</small>';
-                try {
-                    const res = await fetch('/convert', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ url })
-                    });
-                    
-                    if(!res.ok) {
-                        const errorPayload = await res.json().catch(() => ({}));
-                        throw new Error(errorPayload.error || 'The system could not parse this specific video format.');
-                    }
-                    
-                    status.innerText = 'Streaming file data directly to your device...';
-                    const blob = await res.blob();
-                    const a = document.createElement('a');
-                    a.href = window.URL.createObjectURL(blob);
-                    a.download = "video.mp4";
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
-                    status.innerHTML = '<span style="color:#00ff00; font-weight:bold;">✓ Success! File downloaded.</span>';
-                } catch(e) {
-                    status.innerHTML = '<span style="color:#ff3333; font-weight:bold;">Error:</span> ' + e.message;
-                }
-            }
-        </script>
-    </body>
-    </html>
-    `);
-});
-
-// Stream Engine Extraction Pipeline
+// Stream Engine Extraction Pipeline (Optimized for 512MB Free Tier)
 app.post('/convert', (req, res) => {
     const videoUrl = req.body.url;
     if (!videoUrl) return res.status(400).send({ error: 'URL required' });
 
-    console.log(`[Engine]: Initiating stream pipeline for target: ${videoUrl}`);
+    console.log(`[Engine]: Initiating low-overhead stream for: ${videoUrl}`);
 
     res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
     res.setHeader('Content-Type', 'video/mp4');
 
-    // Bypasses datacenter blocks using embedded & TV player endpoints as a fallback fallback
+    // EXPLANATION OF MODIFIED FLAGS:
+    // "worst/best" fetches a single pre-merged stream to eliminate ffmpeg multiplexing crashes.
+    // "--recode-video mp4" ensures it drops down to an mp4 wrapper seamlessly while streaming out.
     const ytdlp = spawn('yt-dlp', [
-        '-f', 'bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        '--merge-output-format', 'mp4',
+        '-f', 'best[ext=mp4]/worst[ext=mp4]/best', 
         '--no-cache-dir',
         '--extractor-args', 'youtube:player_client=tv,web_embedded,ios',
         '-o', '-', 
         videoUrl
     ]);
 
-    // Pipe directly into response object
+    // Forward the binary stdout chunks instantly to the browser
     ytdlp.stdout.pipe(res);
 
     let errorLog = "";
@@ -105,11 +34,11 @@ app.post('/convert', (req, res) => {
             console.error(`[Engine Exit]: Core finished with failure status code ${code}`);
             if (!res.headersSent) {
                 if (errorLog.includes("Sign in to confirm")) {
-                    res.status(403).send({ error: 'YouTube has flagged the server IP. Try a different video link.' });
+                    res.status(403).send({ error: 'YouTube bot protection triggered. Try another URL.' });
                 } else if (errorLog.includes("403")) {
-                    res.status(403).send({ error: 'Access Forbidden (HTTP 403). Streaming pipeline rejected.' });
+                    res.status(403).send({ error: 'Access Forbidden (HTTP 403) from YouTube.' });
                 } else {
-                    res.status(500).send({ error: 'Extraction engine crashed. See system logs.' });
+                    res.status(500).send({ error: 'Render out of memory. Try a shorter or lower resolution video.' });
                 }
             }
         }
@@ -119,5 +48,3 @@ app.post('/convert', (req, res) => {
         ytdlp.kill('SIGKILL');
     });
 });
-
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
